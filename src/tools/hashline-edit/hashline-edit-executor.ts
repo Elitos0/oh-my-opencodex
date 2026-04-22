@@ -129,20 +129,21 @@ export async function executeHashlineEditTool(args: HashlineEditArgs, context: T
       const formattedContent = Buffer.from(await Bun.file(filePath).arrayBuffer()).toString("utf8")
       if (formattedContent !== writeContent) {
         const formattedEnvelope = canonicalizeFileText(formattedContent)
+        const renameTarget = rename && rename !== filePath ? rename : null
+        const effectivePath = renameTarget ?? filePath
         const formattedMeta = buildSuccessMeta(
-          filePath,
+          effectivePath,
           oldEnvelope.content,
           formattedEnvelope.content,
           applyResult.noopEdits,
           applyResult.deduplicatedEdits
         )
-        await publishToolMetadata(metadataContext, formattedMeta)
-        if (rename && rename !== filePath) {
-          await Bun.write(rename, formattedContent)
+        if (renameTarget) {
+          await Bun.write(renameTarget, formattedContent)
           await Bun.file(filePath).delete()
-          return `Moved ${filePath} to ${rename}`
         }
-        return `Updated ${filePath}`
+        await publishToolMetadata(metadataContext, formattedMeta)
+        return renameTarget ? `Moved ${filePath} to ${renameTarget}` : `Updated ${filePath}`
       }
     }
 

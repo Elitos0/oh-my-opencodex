@@ -176,19 +176,32 @@ export async function wakeCommandGateway(
   try {
     const timeout = resolveCommandTimeoutMs(gatewayConfig.timeout)
 
+    const missingVariables: string[] = []
     const interpolated = gatewayConfig.command.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
       const value = variables[key]
-      if (value === undefined) return _match
+      if (value === undefined) {
+        missingVariables.push(key)
+        return shellEscapeArg("")
+      }
       return shellEscapeArg(value)
     })
 
-    const proc = spawn(["sh", "-c", interpolated], {
+    if (missingVariables.length > 0) {
+      console.warn(
+        `[openclaw] gateway "${gatewayName}" command template references undefined variables: ${missingVariables.join(", ")}; substituted empty string.`,
+      )
+    }
+
+    const isWindows = process.platform === "win32"
+    const shellCmd = isWindows ? ["cmd", "/d", "/s", "/c", interpolated] : ["sh", "-c", interpolated]
+    const proc = spawn(shellCmd, {
       env: { ...process.env },
       stdout: "pipe",
-      stderr: "ignore",
-      detached: process.platform !== "win32",
+      stderr: "pipe",
+      detached: !isWindows,
     })
     const stdoutPromise = new Response(proc.stdout).text()
+    const stderrPromise = new Response(proc.stderr).text()
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -207,7 +220,10 @@ export async function wakeCommandGateway(
     }
 
     if (proc.exitCode !== 0) {
-      throw new Error(`Command exited with code ${proc.exitCode}`)
+      const stderrText = await stderrPromise.catch(() => "")
+      const stderrSnippet = stderrText.trim().slice(0, 500)
+      const base = `Command exited with code ${proc.exitCode}`
+      throw new Error(stderrSnippet ? `${base}: ${stderrSnippet}` : base)
     }
 
     const metadata = parseWakeMetadata(await stdoutPromise)

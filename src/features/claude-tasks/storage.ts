@@ -65,7 +65,7 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
   const dir = dirname(filePath)
   ensureDir(dir)
 
-  const tempPath = `${filePath}.tmp.${Date.now()}`
+  const tempPath = `${filePath}.tmp.${Date.now()}.${randomUUID()}`
 
   try {
     writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8")
@@ -107,14 +107,30 @@ export function acquireLock(dirPath: string): { acquired: boolean; release: () =
     })
   }
 
-  const isStale = () => {
+  const readStaleLockSnapshot = (): { raw: string } | null => {
     try {
-      const lockContent = readFileSync(lockPath, "utf-8")
-      const lockData = JSON.parse(lockContent)
+      const raw = readFileSync(lockPath, "utf-8")
+      const lockData = JSON.parse(raw)
       const lockAge = Date.now() - lockData.timestamp
-      return lockAge > STALE_LOCK_THRESHOLD_MS
+      if (lockAge > STALE_LOCK_THRESHOLD_MS) {
+        return { raw }
+      }
+      return null
     } catch {
+      // Missing or unparseable lock: treat as removable (caller must tolerate races).
+      return { raw: "" }
+    }
+  }
+
+  const removeLockIfUnchanged = (snapshot: { raw: string }): boolean => {
+    try {
+      if (!existsSync(lockPath)) return false
+      const current = readFileSync(lockPath, "utf-8")
+      if (current !== snapshot.raw) return false
+      unlinkSync(lockPath)
       return true
+    } catch {
+      return false
     }
   }
 
@@ -134,13 +150,11 @@ export function acquireLock(dirPath: string): { acquired: boolean; release: () =
   ensureDir(dirPath)
 
   let acquired = tryAcquire()
-  if (!acquired && isStale()) {
-    try {
-      unlinkSync(lockPath)
-    } catch {
-      // Ignore cleanup errors
+  if (!acquired) {
+    const snapshot = readStaleLockSnapshot()
+    if (snapshot && removeLockIfUnchanged(snapshot)) {
+      acquired = tryAcquire()
     }
-    acquired = tryAcquire()
   }
 
   if (!acquired) {

@@ -112,23 +112,22 @@ async function handleUpdate(
         task.owner = validatedArgs.owner;
       }
 
-      const addBlocks = args.addBlocks as string[] | undefined;
-      if (addBlocks) {
-        task.blocks = [...new Set([...task.blocks, ...addBlocks])];
+      if (validatedArgs.addBlocks) {
+        task.blocks = [...new Set([...task.blocks, ...validatedArgs.addBlocks])];
       }
 
-      const addBlockedBy = args.addBlockedBy as string[] | undefined;
-      if (addBlockedBy) {
-        task.blockedBy = [...new Set([...task.blockedBy, ...addBlockedBy])];
+      if (validatedArgs.addBlockedBy) {
+        task.blockedBy = [...new Set([...task.blockedBy, ...validatedArgs.addBlockedBy])];
       }
 
       if (validatedArgs.metadata !== undefined) {
-        task.metadata = { ...task.metadata, ...validatedArgs.metadata };
-        Object.keys(task.metadata).forEach((key) => {
-          if (task.metadata?.[key] === null) {
+        const incomingMetadata = validatedArgs.metadata;
+        task.metadata = { ...task.metadata, ...incomingMetadata };
+        for (const key of Object.keys(incomingMetadata)) {
+          if (incomingMetadata[key] === null && task.metadata) {
             delete task.metadata[key];
           }
-        });
+        }
       }
 
       const validatedTask = TaskObjectSchema.parse(task);
