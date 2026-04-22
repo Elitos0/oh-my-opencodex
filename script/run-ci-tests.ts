@@ -74,23 +74,14 @@ export async function createCiTestPlan(rootDirectory: string = process.cwd()): P
   }
 }
 
-async function runBunTest(testFiles: string[], label: string): Promise<void> {
+async function runBunTest(testFiles: string[], label: string): Promise<number> {
   if (testFiles.length === 0) {
-    return
+    return 0
   }
 
   console.log(`::group::${label}`)
-  
-  // For directory paths, exclude _auc* directories which are separate isolated targets
-  const args = testFiles.map(tf => {
-    if (tf.includes('/') && !tf.endsWith('.test.ts')) {
-      // It's a directory path, add negation glob
-      return [tf, '!_auc-*/**/*.test.ts']
-    }
-    return tf
-  }).flat()
-  
-  const command = ["bun", "test", ...args]
+
+  const command = ["bun", "test", ...testFiles]
   const spawnedProcess = Bun.spawn(command, {
     cwd: process.cwd(),
     stdin: "inherit",
@@ -100,9 +91,12 @@ async function runBunTest(testFiles: string[], label: string): Promise<void> {
   const exitCode = await spawnedProcess.exited
   console.log("::endgroup::")
 
-  if (exitCode !== 0) {
-    throw new Error(`Command failed: ${command.join(" ")}`)
-  }
+  return exitCode
+}
+
+type FailedGroup = {
+  label: string
+  exitCode: number
 }
 
 async function main(): Promise<void> {
@@ -112,11 +106,30 @@ async function main(): Promise<void> {
     `Detected ${ciTestPlan.isolatedModuleMockFiles.length} mock.module() test files, ${ciTestPlan.isolatedTestTargets.length} isolated targets, and ${ciTestPlan.sharedTestFiles.length} shared test files.`,
   )
 
+  const failedGroups: FailedGroup[] = []
+
   for (const isolatedTestTarget of ciTestPlan.isolatedTestTargets) {
-    await runBunTest([isolatedTestTarget], `Isolated ${isolatedTestTarget}`)
+    const label = `Isolated ${isolatedTestTarget}`
+    const exitCode = await runBunTest([isolatedTestTarget], label)
+    if (exitCode !== 0) {
+      failedGroups.push({ label, exitCode })
+    }
   }
 
-  await runBunTest(ciTestPlan.sharedTestFiles, "Shared Bun test suite")
+  const sharedLabel = "Shared Bun test suite"
+  const sharedExitCode = await runBunTest(ciTestPlan.sharedTestFiles, sharedLabel)
+  if (sharedExitCode !== 0) {
+    failedGroups.push({ label: sharedLabel, exitCode: sharedExitCode })
+  }
+
+  if (failedGroups.length > 0) {
+    console.error("")
+    console.error(`${failedGroups.length} test group(s) failed:`)
+    for (const group of failedGroups) {
+      console.error(`  - ${group.label} (exit code ${group.exitCode})`)
+    }
+    process.exit(1)
+  }
 }
 
 export const moduleMockPattern = MODULE_MOCK_PATTERN
@@ -126,11 +139,5 @@ if (process.argv.includes("--print-plan")) {
   const ciTestPlan = await createCiTestPlan()
   console.log(JSON.stringify(ciTestPlan, null, 2))
 } else if (import.meta.main) {
-  try {
-    await main()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error(message)
-    process.exit(1)
-  }
+  await main()
 }
