@@ -43,15 +43,23 @@ export function buildAuthorizationUrl(
 }
 
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000
+const CALLBACK_PATH = "/callback"
 
-export function startCallbackServer(port: number): Promise<OAuthCallbackResult> {
+export function startCallbackServer(port: number, expectedState?: string): Promise<OAuthCallbackResult> {
   return new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout>
 
     const server = createServer((request, response) => {
+      const requestUrl = new URL(request.url ?? "/", `http://localhost:${port}`)
+
+      if (requestUrl.pathname !== CALLBACK_PATH) {
+        response.writeHead(404, { "content-type": "text/plain" })
+        response.end("Not Found")
+        return
+      }
+
       clearTimeout(timeoutId)
 
-      const requestUrl = new URL(request.url ?? "/", `http://localhost:${port}`)
       const code = requestUrl.searchParams.get("code")
       const state = requestUrl.searchParams.get("state")
       const error = requestUrl.searchParams.get("error")
@@ -70,6 +78,14 @@ export function startCallbackServer(port: number): Promise<OAuthCallbackResult> 
         response.end("<html><body><h1>Missing code or state</h1></body></html>")
         server.close()
         reject(new Error("OAuth callback missing code or state parameter"))
+        return
+      }
+
+      if (expectedState !== undefined && state !== expectedState) {
+        response.writeHead(400, { "content-type": "text/html" })
+        response.end("<html><body><h1>Invalid state</h1></body></html>")
+        server.close()
+        reject(new Error("OAuth state mismatch"))
         return
       }
 
@@ -138,13 +154,9 @@ export async function runAuthorizationCodeRedirect(options: {
     resource: options.resource,
   })
 
-  const callbackPromise = startCallbackServer(options.callbackPort)
+  const callbackPromise = startCallbackServer(options.callbackPort, state)
   openBrowser(authorizationUrl)
 
   const result = await callbackPromise
-  if (result.state !== state) {
-    throw new Error("OAuth state mismatch")
-  }
-
   return { code: result.code, verifier }
 }

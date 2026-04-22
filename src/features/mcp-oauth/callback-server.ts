@@ -39,7 +39,7 @@ export async function findAvailablePort(startPort: number = DEFAULT_PORT): Promi
 }
 
 export async function startCallbackServer(startPort: number = DEFAULT_PORT): Promise<CallbackServer> {
-  const requestedPort = await findAvailablePort(startPort).catch(() => 0)
+  const requestedPort = await findAvailablePort(startPort)
 
   let resolveCallback: ((result: OAuthCallbackResult) => void) | null = null
   let rejectCallback: ((error: Error) => void) | null = null

@@ -1,3 +1,5 @@
+import { log } from "../../shared/logger"
+
 export type ClientRegistrationRequest = {
   redirect_uris: string[]
   client_name: string
@@ -64,18 +66,32 @@ export async function getOrRegisterClient(
     })
 
     if (!response.ok) {
+      log("MCP OAuth DCR registration failed", {
+        serverIdentifier,
+        registrationEndpoint: options.registrationEndpoint,
+        status: "status" in response ? (response as { status?: number }).status : undefined,
+      })
       return options.clientId ? { clientId: options.clientId } : null
     }
 
     const data: unknown = await response.json()
     const parsed = parseRegistrationResponse(data)
     if (!parsed) {
+      log("MCP OAuth DCR registration response missing client_id", {
+        serverIdentifier,
+        registrationEndpoint: options.registrationEndpoint,
+      })
       return options.clientId ? { clientId: options.clientId } : null
     }
 
     options.storage.setClientRegistration(serverIdentifier, parsed)
     return parsed
-  } catch {
+  } catch (error) {
+    log("MCP OAuth DCR registration threw", {
+      serverIdentifier,
+      registrationEndpoint: options.registrationEndpoint,
+      error: error instanceof Error ? error.message : String(error),
+    })
     return options.clientId ? { clientId: options.clientId } : null
   }
 }
