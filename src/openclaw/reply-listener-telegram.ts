@@ -7,6 +7,7 @@ import type { OpenClawConfig } from "./types"
 interface TelegramMessage {
   message_id?: number
   chat?: { id?: number | string }
+  from?: { id?: number | string }
   text?: string
   reply_to_message?: { message_id?: number }
 }
@@ -29,6 +30,14 @@ export async function pollTelegramReplies(
 ): Promise<void> {
   const replyListener = config.replyListener
   if (!replyListener?.telegramBotToken || !replyListener.telegramChatId) return
+  // Require explicit user allowlist. Without this, any participant in the chat
+  // could inject commands into a tmux pane (same model as Discord listener).
+  if (!replyListener.authorizedTelegramUserIds || replyListener.authorizedTelegramUserIds.length === 0) {
+    logReplyListenerMessage(
+      "Telegram reply listener disabled: authorizedTelegramUserIds is empty. Set it in openclaw.replyListener to enable inbound replies.",
+    )
+    return
+  }
 
   try {
     const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0
@@ -53,6 +62,14 @@ export async function pollTelegramReplies(
       if (!message?.reply_to_message?.message_id) continue
       if (String(message.chat?.id) !== replyListener.telegramChatId) continue
       if (!message.text) continue
+
+      const fromId = message.from?.id !== undefined ? String(message.from.id) : ""
+      if (!fromId || !replyListener.authorizedTelegramUserIds.includes(fromId)) {
+        logReplyListenerMessage(
+          `WARN: Telegram reply from unauthorized user ${fromId || "<unknown>"} dropped`,
+        )
+        continue
+      }
 
       const mapping = lookupByMessageId("telegram", String(message.reply_to_message.message_id))
       if (!mapping) continue

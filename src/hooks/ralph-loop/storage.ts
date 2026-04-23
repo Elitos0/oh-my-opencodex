@@ -1,8 +1,10 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, renameSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { randomUUID } from "node:crypto"
+import yaml from "js-yaml"
 import { parseFrontmatter } from "../../shared/frontmatter"
 import type { RalphLoopState } from "./types"
-import { DEFAULT_STATE_FILE, DEFAULT_COMPLETION_PROMISE, DEFAULT_MAX_ITERATIONS } from "./constants"
+import { DEFAULT_STATE_FILE, DEFAULT_COMPLETION_PROMISE, DEFAULT_MAX_ITERATIONS, ULTRAWORK_MAX_ITERATIONS } from "./constants"
 
 export function getStateFilePath(directory: string, customPath?: string): string {
   return customPath
@@ -44,7 +46,7 @@ export function readState(directory: string, customPath?: string): RalphLoopStat
     const maxIterations =
       data.max_iterations === undefined || data.max_iterations === ""
         ? ultrawork
-          ? undefined
+          ? ULTRAWORK_MAX_ITERATIONS
           : DEFAULT_MAX_ITERATIONS
         : Number(data.max_iterations) || DEFAULT_MAX_ITERATIONS
 
@@ -96,40 +98,62 @@ export function writeState(
       mkdirSync(dir, { recursive: true })
     }
 
-    const sessionIdLine = state.session_id ? `session_id: "${state.session_id}"\n` : ""
-    const ultraworkLine = state.ultrawork !== undefined ? `ultrawork: ${state.ultrawork}\n` : ""
-    const verificationPendingLine =
-      state.verification_pending !== undefined
-        ? `verification_pending: ${state.verification_pending}\n`
-        : ""
-    const strategyLine = state.strategy ? `strategy: "${state.strategy}"\n` : ""
-    const initialCompletionPromiseLine = state.initial_completion_promise
-      ? `initial_completion_promise: "${state.initial_completion_promise}"\n`
-      : ""
-    const verificationAttemptLine = state.verification_attempt_id
-      ? `verification_attempt_id: "${state.verification_attempt_id}"\n`
-      : ""
-    const verificationSessionLine = state.verification_session_id
-      ? `verification_session_id: "${state.verification_session_id}"\n`
-      : ""
-    const messageCountAtStartLine =
-      typeof state.message_count_at_start === "number"
-        ? `message_count_at_start: ${state.message_count_at_start}\n`
-        : ""
-    const maxIterationsLine =
-      typeof state.max_iterations === "number"
-        ? `max_iterations: ${state.max_iterations}\n`
-        : ""
-    const content = `---
-active: ${state.active}
-iteration: ${state.iteration}
-${maxIterationsLine}completion_promise: "${state.completion_promise}"
-${initialCompletionPromiseLine}${verificationAttemptLine}${verificationSessionLine}started_at: "${state.started_at}"
-${sessionIdLine}${ultraworkLine}${verificationPendingLine}${strategyLine}${messageCountAtStartLine}---
-${state.prompt}
-`
+    const frontmatter: Record<string, unknown> = {
+      active: state.active,
+      iteration: state.iteration,
+      completion_promise: state.completion_promise,
+      started_at: state.started_at,
+    }
+    if (typeof state.max_iterations === "number") {
+      frontmatter.max_iterations = state.max_iterations
+    }
+    if (state.initial_completion_promise) {
+      frontmatter.initial_completion_promise = state.initial_completion_promise
+    }
+    if (state.verification_attempt_id) {
+      frontmatter.verification_attempt_id = state.verification_attempt_id
+    }
+    if (state.verification_session_id) {
+      frontmatter.verification_session_id = state.verification_session_id
+    }
+    if (state.session_id) {
+      frontmatter.session_id = state.session_id
+    }
+    if (state.ultrawork !== undefined) {
+      frontmatter.ultrawork = state.ultrawork
+    }
+    if (state.verification_pending !== undefined) {
+      frontmatter.verification_pending = state.verification_pending
+    }
+    if (state.strategy) {
+      frontmatter.strategy = state.strategy
+    }
+    if (typeof state.message_count_at_start === "number") {
+      frontmatter.message_count_at_start = state.message_count_at_start
+    }
 
-    writeFileSync(filePath, content, "utf-8")
+    // js-yaml with JSON_SCHEMA escapes special chars, handles multiline strings,
+    // and prevents code execution via custom tags.
+    const yamlBody = yaml.dump(frontmatter, {
+      schema: yaml.JSON_SCHEMA,
+      lineWidth: -1,
+      noRefs: true,
+      sortKeys: false,
+    })
+    const content = `---\n${yamlBody}---\n${state.prompt}\n`
+
+    const tempPath = `${filePath}.${randomUUID()}.tmp`
+    try {
+      writeFileSync(tempPath, content, "utf-8")
+      renameSync(tempPath, filePath)
+    } catch (err) {
+      try {
+        if (existsSync(tempPath)) unlinkSync(tempPath)
+      } catch {
+        // best effort cleanup
+      }
+      throw err
+    }
     return true
   } catch {
     return false

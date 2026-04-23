@@ -186,7 +186,10 @@ export async function startReplyListener(
 
   if (await isDaemonRunning()) {
     const state = readReplyListenerDaemonState()
-    const runtimeSignature = state?.configSignature ?? getReplyListenerRuntimeSignature(readReplyListenerDaemonConfig())
+    const persistedConfig = readReplyListenerDaemonConfig()
+    const runtimeSignature = state?.configSignature ?? getReplyListenerRuntimeSignature(
+      persistedConfig ? normalizeReplyListenerConfig(persistedConfig) : null,
+    )
     if (runtimeSignature === getReplyListenerRuntimeSignature(normalizedConfig)) {
       return {
         success: true,

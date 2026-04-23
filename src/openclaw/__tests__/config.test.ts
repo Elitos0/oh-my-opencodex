@@ -90,7 +90,10 @@ describe("OpenClaw Config", () => {
     expect(config.replyListener).toEqual({
       discordBotToken: "discord-token",
       discordChannelId: "channel-id",
+      telegramBotToken: undefined,
+      telegramChatId: undefined,
       authorizedDiscordUserIds: ["user-1", "user-2"],
+      authorizedTelegramUserIds: [],
       pollIntervalMs: 500,
       rateLimitPerMinute: 1,
       maxMessageLength: 4000,
