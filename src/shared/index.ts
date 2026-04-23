@@ -1,4 +1,5 @@
 export * from "./frontmatter"
+export * from "./secret-redaction"
 export * from "./command-executor"
 export * from "./contains-path"
 export * from "./file-reference-resolver"

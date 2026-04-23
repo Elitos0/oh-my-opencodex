@@ -7,7 +7,31 @@ import {
 } from "./dispatcher"
 import { getCurrentTmuxSession, captureTmuxPane } from "./tmux"
 import { startReplyListener, stopReplyListener } from "./reply-listener"
+import { redactSensitiveData } from "../shared/secret-redaction"
 import type { OpenClawConfig, OpenClawContext, OpenClawPayload, WakeResult } from "./types"
+
+// Fields that may contain agent-generated text copied from tool outputs,
+// assistant responses, or captured tmux scrollback. These are the fields most
+// likely to carry leaked credentials (.env dumps, `env` commands, bearer
+// tokens in HTTP logs, etc.) outbound to webhooks / shell commands.
+const REDACTABLE_CONTEXT_KEYS = [
+  "prompt",
+  "contextSummary",
+  "reasoning",
+  "question",
+  "tmuxTail",
+] as const satisfies ReadonlyArray<keyof OpenClawContext>
+
+function redactContext(context: OpenClawContext): OpenClawContext {
+  const result: OpenClawContext = { ...context }
+  for (const key of REDACTABLE_CONTEXT_KEYS) {
+    const value = result[key]
+    if (typeof value === "string" && value.length > 0) {
+      result[key] = redactSensitiveData(value)
+    }
+  }
+  return result
+}
 
 const DEBUG =
   process.env.OMO_OPENCLAW_DEBUG === "1"
@@ -74,16 +98,24 @@ export async function wakeOpenClaw(
       }
     }
 
+    // Redact likely credentials from agent-generated fields before they leave
+    // the process via webhook / shell command. Paths, IDs, and timestamps are
+    // not redacted; only free-form strings that can contain tool output.
+    const redactedContext = redactContext({
+      ...enrichedContext,
+      tmuxTail: tmuxTail !== undefined ? tmuxTail : enrichedContext.tmuxTail,
+    })
+
     const variables: Record<string, string | undefined> = {
       sessionId: enrichedContext.sessionId,
       projectPath: enrichedContext.projectPath,
       projectName: enrichedContext.projectPath ? basename(enrichedContext.projectPath) : undefined,
       tmuxSession,
-      prompt: enrichedContext.prompt,
-      contextSummary: enrichedContext.contextSummary,
-      reasoning: enrichedContext.reasoning,
-      question: enrichedContext.question,
-      tmuxTail,
+      prompt: redactedContext.prompt,
+      contextSummary: redactedContext.contextSummary,
+      reasoning: redactedContext.reasoning,
+      question: redactedContext.question,
+      tmuxTail: redactedContext.tmuxTail,
       event,
       timestamp: now,
       replyChannel,
@@ -91,7 +123,9 @@ export async function wakeOpenClaw(
       replyThread,
     }
 
-    const interpolatedInstruction = interpolateInstruction(instruction, variables)
+    const interpolatedInstruction = redactSensitiveData(
+      interpolateInstruction(instruction, variables),
+    )
     variables.instruction = interpolatedInstruction
 
     let result: WakeResult
@@ -108,11 +142,11 @@ export async function wakeOpenClaw(
         projectPath: enrichedContext.projectPath,
         projectName: enrichedContext.projectPath ? basename(enrichedContext.projectPath) : undefined,
         tmuxSession,
-        tmuxTail,
+        tmuxTail: redactedContext.tmuxTail,
         ...(replyChannel !== undefined && { channel: replyChannel }),
         ...(replyTarget !== undefined && { to: replyTarget }),
         ...(replyThread !== undefined && { threadId: replyThread }),
-        context: buildWhitelistedContext(enrichedContext),
+        context: buildWhitelistedContext(redactedContext),
       }
 
       result = await wakeGateway(gatewayName, gateway, payload)

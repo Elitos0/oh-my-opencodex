@@ -1,5 +1,7 @@
 import type { ToolContext } from "@opencode-ai/plugin/tool"
+import { isAbsolute, resolve } from "node:path"
 import { publishToolMetadata } from "../../features/tool-metadata-store"
+import { isWithinProject } from "../../shared/contains-path"
 import { applyHashlineEditsWithReport } from "./edit-operations"
 import { countLineDiffs, generateUnifiedDiff } from "./diff-utils"
 import { canonicalizeFileText, restoreFileText } from "./file-text-canonicalization"
@@ -8,6 +10,31 @@ import type { HashlineEdit } from "./types"
 import { HashlineMismatchError } from "./validation"
 import { runFormattersForFile, type FormatterClient } from "./formatter-trigger"
 import type { PluginContext } from "../../plugin/types"
+
+// Resolve a user-supplied path against the project root and verify the result
+// is still inside the project (after resolving symlinks via isWithinProject).
+// Returns the absolute canonical path on success, or a descriptive error string.
+function resolveProjectPath(
+  rawPath: string,
+  projectRoot: string,
+  field: "filePath" | "rename",
+): { ok: true; resolved: string } | { ok: false; error: string } {
+  if (typeof rawPath !== "string" || rawPath.length === 0) {
+    return { ok: false, error: `Error: ${field} must be a non-empty string` }
+  }
+  if (!projectRoot) {
+    return { ok: false, error: `Error: project directory is not set; cannot validate ${field}` }
+  }
+
+  const absolute = isAbsolute(rawPath) ? rawPath : resolve(projectRoot, rawPath)
+  if (!isWithinProject(absolute, projectRoot)) {
+    return {
+      ok: false,
+      error: `Error: ${field} escapes project root (${projectRoot}); refusing to operate on ${rawPath}`,
+    }
+  }
+  return { ok: true, resolved: absolute }
+}
 
 interface HashlineEditArgs {
   filePath: string
@@ -78,10 +105,9 @@ function buildSuccessMeta(
 export async function executeHashlineEditTool(args: HashlineEditArgs, context: ToolContext, pluginCtx?: PluginContext): Promise<string> {
   try {
     const metadataContext = context as ToolContextWithMetadata
-    const filePath = args.filePath
-    const { delete: deleteMode, rename } = args
+    const { delete: deleteMode } = args
 
-    if (deleteMode && rename) {
+    if (deleteMode && args.rename) {
       return "Error: delete and rename cannot be used together"
     }
     if (deleteMode && args.edits.length > 0) {
@@ -90,6 +116,22 @@ export async function executeHashlineEditTool(args: HashlineEditArgs, context: T
 
     if (!deleteMode && (!args.edits || !Array.isArray(args.edits) || args.edits.length === 0)) {
       return "Error: edits parameter must be a non-empty array"
+    }
+
+    // Guard against path traversal and symlink escape. Both filePath and rename
+    // must resolve inside context.directory; isWithinProject follows symlinks
+    // via realpath so an attacker-controlled symlink pointing at ~/.ssh or /etc
+    // cannot be used to smuggle writes outside the project.
+    const projectRoot = context.directory ?? ""
+    const filePathCheck = resolveProjectPath(args.filePath, projectRoot, "filePath")
+    if (!filePathCheck.ok) return filePathCheck.error
+    const filePath = filePathCheck.resolved
+
+    let rename: string | undefined
+    if (args.rename) {
+      const renameCheck = resolveProjectPath(args.rename, projectRoot, "rename")
+      if (!renameCheck.ok) return renameCheck.error
+      rename = renameCheck.resolved
     }
 
     const edits = deleteMode ? [] : normalizeHashlineEdits(args.edits)
