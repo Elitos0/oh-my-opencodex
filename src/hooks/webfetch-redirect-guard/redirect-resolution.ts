@@ -4,6 +4,7 @@ import {
   MAX_WEBFETCH_TIMEOUT_MS,
   WEBFETCH_REDIRECT_STATUSES,
 } from "./constants"
+import { checkUrlSafeForFetch } from "./ssrf-guard"
 
 export type WebFetchFormat = "markdown" | "text" | "html"
 
@@ -16,6 +17,7 @@ type RedirectResolutionParams = {
 export type RedirectResolutionResult =
   | { type: "resolved"; url: string }
   | { type: "exceeded"; url: string; maxRedirects: number }
+  | { type: "blocked"; url: string; reason: string }
 
 function buildAcceptHeader(format: WebFetchFormat): string {
   switch (format) {
@@ -59,6 +61,15 @@ export async function resolveWebFetchRedirects(
   let currentUrl = params.url
   let redirectCount = 0
 
+  // SSRF guard: validate the initial URL before the first fetch, and every
+  // redirect target before following it. Blocks non-HTTP(S) schemes (file://,
+  // gopher://, data:, ...) and private/loopback/metadata IP addresses
+  // (127.0.0.0/8, 169.254.169.254, RFC1918, etc.).
+  const initialCheck = await checkUrlSafeForFetch(currentUrl)
+  if (!initialCheck.ok) {
+    return { type: "blocked", url: currentUrl, reason: initialCheck.reason }
+  }
+
   while (true) {
     const response = await fetch(currentUrl, {
       headers,
@@ -83,7 +94,12 @@ export async function resolveWebFetchRedirects(
       }
     }
 
-    currentUrl = resolveRedirectLocation(currentUrl, location)
+    const nextUrl = resolveRedirectLocation(currentUrl, location)
+    const redirectCheck = await checkUrlSafeForFetch(nextUrl)
+    if (!redirectCheck.ok) {
+      return { type: "blocked", url: nextUrl, reason: redirectCheck.reason }
+    }
+    currentUrl = nextUrl
     redirectCount += 1
   }
 }
