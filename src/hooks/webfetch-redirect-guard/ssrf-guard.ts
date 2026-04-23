@@ -62,16 +62,109 @@ function isIPv4Denied(ip: string): boolean {
   return false
 }
 
+/**
+ * Expand an IPv6 address string to its full 8-group hex form. Accepts any
+ * valid IPv6 literal (with or without `::`, with or without an embedded
+ * dotted-decimal IPv4 tail). Returns null for malformed input.
+ *
+ * Example:
+ *   "::1"                       -> [0, 0, 0, 0, 0, 0, 0, 1]
+ *   "::ffff:7f00:1"             -> [0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001]
+ *   "::ffff:127.0.0.1"          -> [0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001]
+ *   "0:0:0:0:0:ffff:7f00:1"     -> [0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001]
+ */
+function expandIPv6(ip: string): number[] | null {
+  // Split off any `::` so we can count groups on each side.
+  const doubleColonParts = ip.split("::")
+  if (doubleColonParts.length > 2) return null
+
+  const parseSide = (side: string): number[] | null => {
+    if (side === "") return []
+    const groups = side.split(":")
+    const result: number[] = []
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i] ?? ""
+      // Dotted-quad IPv4 tail is only legal in the last segment.
+      if (g.includes(".")) {
+        if (i !== groups.length - 1) return null
+        const octets = g.split(".")
+        if (octets.length !== 4) return null
+        const bytes: number[] = []
+        for (const octet of octets) {
+          const n = Number(octet)
+          if (!Number.isInteger(n) || n < 0 || n > 255) return null
+          bytes.push(n)
+        }
+        result.push((bytes[0]! << 8) | bytes[1]!)
+        result.push((bytes[2]! << 8) | bytes[3]!)
+        continue
+      }
+      if (g.length === 0 || g.length > 4) return null
+      if (!/^[0-9a-f]+$/.test(g)) return null
+      result.push(parseInt(g, 16))
+    }
+    return result
+  }
+
+  const headRaw = doubleColonParts[0] ?? ""
+  const tailRaw = doubleColonParts.length === 2 ? (doubleColonParts[1] ?? "") : ""
+  const head = parseSide(headRaw)
+  if (head === null) return null
+  const tail = parseSide(tailRaw)
+  if (tail === null) return null
+
+  if (doubleColonParts.length === 2) {
+    const zeroFill = 8 - head.length - tail.length
+    if (zeroFill < 0) return null
+    return [...head, ...new Array(zeroFill).fill(0), ...tail]
+  }
+  return head.length === 8 ? head : null
+}
+
 function isIPv6Denied(ip: string): boolean {
   const normalized = ip.toLowerCase()
 
-  // Unspecified
-  if (normalized === "::" || normalized === "::0") return true
-  // Loopback ::1
-  if (normalized === "::1") return true
-  // IPv4-mapped ::ffff:a.b.c.d - test the embedded IPv4
-  const v4Mapped = normalized.match(/^::ffff:([0-9.]+)$/)
-  if (v4Mapped && v4Mapped[1] && isIPv4Denied(v4Mapped[1])) return true
+  // Unspecified (::), loopback (::1), IPv4-mapped (::ffff:a.b.c.d and all
+  // equivalent hex/expanded forms like ::ffff:7f00:1) are canonicalised via
+  // full expansion so the IPv4 checks catch every representation.
+  const groups = expandIPv6(normalized)
+  if (groups !== null) {
+    // All-zeros = ::
+    if (groups.every((g) => g === 0)) return true
+    // ::1
+    if (
+      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
+      && groups[4] === 0 && groups[5] === 0 && groups[6] === 0 && groups[7] === 1
+    ) {
+      return true
+    }
+    // IPv4-mapped prefix ::ffff:0:0/96 -- extract low 32 bits as an IPv4
+    // dotted-quad and delegate to isIPv4Denied. This blocks hex forms such
+    // as ::ffff:7f00:1 (127.0.0.1), ::ffff:a9fe:a9fe (169.254.169.254),
+    // 0:0:0:0:0:ffff:7f00:1, etc.
+    if (
+      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
+      && groups[4] === 0 && groups[5] === 0xffff
+    ) {
+      const high = groups[6]!
+      const low = groups[7]!
+      const mapped = `${(high >>> 8) & 0xff}.${high & 0xff}.${(low >>> 8) & 0xff}.${low & 0xff}`
+      if (isIPv4Denied(mapped)) return true
+    }
+    // IPv4-compatible prefix ::/96 (deprecated; treat embedded IPv4 the
+    // same way). An all-zero first 6 groups plus non-zero tail pointing at
+    // a private v4 should be rejected for defence-in-depth.
+    if (
+      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
+      && groups[4] === 0 && groups[5] === 0 && (groups[6] !== 0 || groups[7] !== 0)
+    ) {
+      const high = groups[6]!
+      const low = groups[7]!
+      const mapped = `${(high >>> 8) & 0xff}.${high & 0xff}.${(low >>> 8) & 0xff}.${low & 0xff}`
+      if (isIPv4Denied(mapped)) return true
+    }
+  }
+
   // Link-local fe80::/10
   if (/^fe[89ab][0-9a-f]?:/.test(normalized)) return true
   // Unique local fc00::/7

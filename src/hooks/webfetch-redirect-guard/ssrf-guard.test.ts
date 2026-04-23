@@ -59,8 +59,19 @@ describe("isDeniedIp", () => {
     const deniedCases: Array<[string, string]> = [
       ["::1", "loopback"],
       ["::", "unspecified"],
-      ["::ffff:127.0.0.1", "v4-mapped loopback"],
-      ["::ffff:169.254.169.254", "v4-mapped AWS metadata"],
+      ["::ffff:127.0.0.1", "v4-mapped loopback (dotted)"],
+      ["::ffff:169.254.169.254", "v4-mapped AWS metadata (dotted)"],
+      // Hex / fully-expanded IPv4-mapped forms -- must not be bypassed.
+      ["::ffff:7f00:1", "v4-mapped loopback (hex)"],
+      ["::ffff:7F00:0001", "v4-mapped loopback (hex uppercase)"],
+      ["::ffff:a9fe:a9fe", "v4-mapped AWS metadata (hex)"],
+      ["0:0:0:0:0:ffff:7f00:1", "v4-mapped loopback (expanded)"],
+      ["0:0:0:0:0:ffff:a9fe:a9fe", "v4-mapped metadata (expanded)"],
+      ["0:0:0:0:0:ffff:127.0.0.1", "v4-mapped loopback (mixed expanded)"],
+      ["::ffff:c0a8:1", "v4-mapped 192.168.0.1 (hex)"],
+      ["::ffff:ac10:1", "v4-mapped 172.16.0.1 (hex)"],
+      // IPv4-compatible (deprecated ::/96) -- defence in depth.
+      ["::7f00:1", "v4-compatible loopback (hex)"],
       ["fe80::1", "link-local"],
       ["fc00::1", "unique local"],
       ["fd12::1", "unique local"],
