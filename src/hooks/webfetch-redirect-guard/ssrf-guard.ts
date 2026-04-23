@@ -19,36 +19,45 @@ function ipv4ToInt(ip: string): number | null {
   return result >>> 0
 }
 
+// `&` in JavaScript returns a signed 32-bit integer, so `(addr & mask)` is
+// negative whenever the top bit is set (i.e. any class-B/C/D/E range), while
+// the compared literals like 0xa9fe0000 are positive Numbers > 2^31. The
+// `>>> 0` shift re-interprets the bit pattern as unsigned 32-bit so the
+// comparison is well-defined for the full 0.0.0.0-255.255.255.255 range.
+function inCidr(addr: number, mask: number, network: number): boolean {
+  return ((addr & mask) >>> 0) === network
+}
+
 function isIPv4Denied(ip: string): boolean {
   const addr = ipv4ToInt(ip)
   if (addr === null) return false
 
   // 0.0.0.0/8           "this" network
-  if ((addr & 0xff000000) === 0x00000000) return true
+  if (inCidr(addr, 0xff000000, 0x00000000)) return true
   // 10.0.0.0/8          RFC1918 private
-  if ((addr & 0xff000000) === 0x0a000000) return true
+  if (inCidr(addr, 0xff000000, 0x0a000000)) return true
   // 127.0.0.0/8         loopback
-  if ((addr & 0xff000000) === 0x7f000000) return true
+  if (inCidr(addr, 0xff000000, 0x7f000000)) return true
   // 169.254.0.0/16      link-local (includes AWS 169.254.169.254, GCE metadata)
-  if ((addr & 0xffff0000) === 0xa9fe0000) return true
+  if (inCidr(addr, 0xffff0000, 0xa9fe0000)) return true
   // 172.16.0.0/12       RFC1918 private
-  if ((addr & 0xfff00000) === 0xac100000) return true
+  if (inCidr(addr, 0xfff00000, 0xac100000)) return true
   // 192.0.0.0/24        IETF protocol assignments
-  if ((addr & 0xffffff00) === 0xc0000000) return true
+  if (inCidr(addr, 0xffffff00, 0xc0000000)) return true
   // 192.0.2.0/24        TEST-NET-1
-  if ((addr & 0xffffff00) === 0xc0000200) return true
+  if (inCidr(addr, 0xffffff00, 0xc0000200)) return true
   // 192.168.0.0/16      RFC1918 private
-  if ((addr & 0xffff0000) === 0xc0a80000) return true
+  if (inCidr(addr, 0xffff0000, 0xc0a80000)) return true
   // 198.18.0.0/15       benchmarking
-  if ((addr & 0xfffe0000) === 0xc6120000) return true
+  if (inCidr(addr, 0xfffe0000, 0xc6120000)) return true
   // 198.51.100.0/24     TEST-NET-2
-  if ((addr & 0xffffff00) === 0xc6336400) return true
+  if (inCidr(addr, 0xffffff00, 0xc6336400)) return true
   // 203.0.113.0/24      TEST-NET-3
-  if ((addr & 0xffffff00) === 0xcb007100) return true
+  if (inCidr(addr, 0xffffff00, 0xcb007100)) return true
   // 224.0.0.0/4         multicast
-  if ((addr & 0xf0000000) === 0xe0000000) return true
+  if (inCidr(addr, 0xf0000000, 0xe0000000)) return true
   // 240.0.0.0/4         reserved (includes broadcast 255.255.255.255)
-  if ((addr & 0xf0000000) === 0xf0000000) return true
+  if (inCidr(addr, 0xf0000000, 0xf0000000)) return true
 
   return false
 }
