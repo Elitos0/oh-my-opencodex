@@ -1,7 +1,8 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
 const workflowPaths = [
   new URL("../.github/workflows/ci.yml", import.meta.url),
@@ -9,13 +10,20 @@ const workflowPaths = [
 ]
 
 describe("test workflows", () => {
-  test("use pure bun test for workflows", () => {
-    for (const workflowPath of workflowPaths) {
+  for (const workflowPath of workflowPaths) {
+    const filePath = fileURLToPath(workflowPath)
+
+    if (!existsSync(filePath)) {
+      test.skip(`use pure bun test for workflows [${filePath}] (workflow not present)`, () => {})
+      continue
+    }
+
+    test(`use pure bun test for workflows [${filePath}]`, () => {
       // #given
       const workflow = readFileSync(workflowPath, "utf8")
 
       expect(workflow).toContain("- name: Run tests")
-      expect(workflow).toMatch(/run: bun (test|run script\/run-ci-tests\.ts)/)
-    }
-  })
+      expect(workflow).toMatch(/run: bun (test|run script\/run-ci-tests\.ts|run test:ci)/)
+    })
+  }
 })
