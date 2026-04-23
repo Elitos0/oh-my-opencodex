@@ -33,6 +33,19 @@ function buildPromisePattern(promise: string): RegExp {
 	return new RegExp(`<promise>\\s*${escapeRegex(promise)}\\s*</promise>`, "is")
 }
 
+// Strip content where a quoted <promise>DONE</promise> would be a false positive:
+// fenced code blocks, inline code, markdown blockquotes, and XML-style quote wrappers.
+// We only consider the agent's own top-level assertion as completion.
+function stripQuotedRegions(text: string): string {
+	return text
+		.replace(/```[\s\S]*?```/g, "")
+		.replace(/~~~[\s\S]*?~~~/g, "")
+		.replace(/`[^`\n]*`/g, "")
+		.replace(/<quote>[\s\S]*?<\/quote>/gi, "")
+		.replace(/<blockquote>[\s\S]*?<\/blockquote>/gi, "")
+		.replace(/^>.*$/gm, "")
+}
+
 function shouldInspectSessionMessagePart(
 	partType: string,
 	promise: string,
@@ -87,7 +100,7 @@ export function detectCompletionInTranscript(
 				const entryText = extractTranscriptEntryText(entry)
 				if (!entryText) continue
 				if (!shouldInspectTranscriptEntry(entry, promise, entryText)) continue
-				if (pattern.test(entryText)) return true
+				if (pattern.test(stripQuotedRegions(entryText))) return true
 			} catch {
 				continue
 			}
@@ -146,7 +159,7 @@ export async function detectCompletionInSessionMessages(
 				const partText = part.text ?? ""
 				if (!partText) continue
 				if (!shouldInspectSessionMessagePart(part.type, options.promise, partText)) continue
-				if (pattern.test(partText)) {
+				if (pattern.test(stripQuotedRegions(partText))) {
 					return true
 				}
 			}

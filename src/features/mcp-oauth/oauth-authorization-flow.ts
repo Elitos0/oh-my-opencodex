@@ -133,6 +133,46 @@ function openBrowser(url: string): void {
   }
 }
 
+/**
+ * Returns true when the current process has no interactive user attached, so
+ * an OAuth browser round-trip cannot complete. Detects:
+ *  - CI runners (CI, GITHUB_ACTIONS, BUILDKITE, CIRCLECI, GITLAB_CI, ...)
+ *  - opencode's explicit OPENCODE_NON_INTERACTIVE flag (set by `opencode run`)
+ *  - subagent / background-task launches (OPENCODE_SUBAGENT=1)
+ *  - detached stdin/stdout (no TTY on either side)
+ */
+export function isNonInteractiveEnvironment(): boolean {
+  const env = process.env
+  if (env.OPENCODE_NON_INTERACTIVE === "1" || env.OPENCODE_NON_INTERACTIVE === "true") {
+    return true
+  }
+  if (env.OPENCODE_SUBAGENT === "1" || env.OPENCODE_SUBAGENT === "true") {
+    return true
+  }
+  if (env.CI && env.CI !== "false" && env.CI !== "0") return true
+  if (env.GITHUB_ACTIONS || env.BUILDKITE || env.CIRCLECI || env.GITLAB_CI || env.JENKINS_URL) {
+    return true
+  }
+  // Both stdin and stdout detached -> no human on the other end.
+  const stdinTty = Boolean(process.stdin.isTTY)
+  const stdoutTty = Boolean(process.stdout.isTTY)
+  if (!stdinTty && !stdoutTty) return true
+  return false
+}
+
+export class NonInteractiveOAuthError extends Error {
+  constructor(authorizationUrl: string) {
+    super(
+      `Cannot complete OAuth authorization in a non-interactive environment. ` +
+        `A human must open the authorization URL in a browser and approve access. ` +
+        `Run \`bunx oh-my-opencode mcp-oauth login <server>\` from an interactive terminal, ` +
+        `or pre-seed the token file under ~/.config/opencode/mcp-oauth/. ` +
+        `Authorization URL (for manual completion): ${authorizationUrl}`,
+    )
+    this.name = "NonInteractiveOAuthError"
+  }
+}
+
 export async function runAuthorizationCodeRedirect(options: {
   authorizationEndpoint: string
   callbackPort: number
@@ -153,6 +193,14 @@ export async function runAuthorizationCodeRedirect(options: {
     scopes: options.scopes,
     resource: options.resource,
   })
+
+  // Fast-fail before binding the callback server and waiting 5 minutes: a
+  // subagent / CI run has no browser or human to press the consent button,
+  // so the only outcome of waiting is hanging the caller until timeout
+  // (and then retrying 3 times on 401 = 15 minute stall per MCP server).
+  if (isNonInteractiveEnvironment()) {
+    throw new NonInteractiveOAuthError(authorizationUrl)
+  }
 
   const callbackPromise = startCallbackServer(options.callbackPort, state)
   openBrowser(authorizationUrl)

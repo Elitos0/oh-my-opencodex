@@ -385,9 +385,25 @@ export class BackgroundManager {
 
         await this.concurrencyManager.acquire(key)
 
+        // Store the acquired slot on the task object immediately so cancelTask
+        // can release it on any code path (session.create / tmux callback /
+        // initial cancelled-check) before startTask has finished wiring state.
+        // Previously concurrencyKey was only set at the end of startTask
+        // (after ~session.create + tmux callback awaits), leaving a window
+        // where cancelTask ran, saw task.concurrencyKey === undefined, and
+        // the slot was only released if startTask also observed the cancel.
+        item.task.concurrencyKey = key
+        item.task.concurrencyGroup = key
+
         if (item.task.status === "cancelled" || item.task.status === "error" || item.task.status === "interrupt") {
           this.rollbackPreStartDescendantReservation(item.task)
-          this.concurrencyManager.release(key)
+          // If concurrencyKey is undefined here, cancelTask already released
+          // the slot -- do NOT double-release. cancelTask always sets
+          // task.concurrencyKey = undefined after release (manager.ts:1580).
+          if (item.task.concurrencyKey) {
+            this.concurrencyManager.release(item.task.concurrencyKey)
+            item.task.concurrencyKey = undefined
+          }
           continue
         }
 
@@ -403,11 +419,11 @@ export class BackgroundManager {
           item.task.error = error instanceof Error ? error.message : String(error)
           item.task.completedAt = new Date()
 
+          // See comment at the pre-start cancel branch above: only release
+          // via the task handle. If undefined, cancelTask already released.
           if (item.task.concurrencyKey) {
             this.concurrencyManager.release(item.task.concurrencyKey)
             item.task.concurrencyKey = undefined
-          } else {
-            this.concurrencyManager.release(key)
           }
 
           removeTaskToastTracking(item.task.id)
@@ -472,7 +488,15 @@ export class BackgroundManager {
 
     if (task.status === "cancelled") {
       await this.abortSessionWithLogging(sessionID, "cancelled pre-start cleanup")
-      this.concurrencyManager.release(concurrencyKey)
+      // Release via task handle (set in processKey) so we don't double-release
+      // if cancelTask already released it during the session.create await.
+      // When concurrencyKey is undefined, cancelTask has already released --
+      // do NOT fall back to releasing `concurrencyKey` local; that would
+      // double-release and corrupt the semaphore count.
+      if (task.concurrencyKey) {
+        this.concurrencyManager.release(task.concurrencyKey)
+        task.concurrencyKey = undefined
+      }
       return
     }
 
@@ -508,7 +532,12 @@ export class BackgroundManager {
       if (task.rootSessionID) {
         this.unregisterRootDescendant(task.rootSessionID)
       }
-      this.concurrencyManager.release(concurrencyKey)
+      // Same rule as the pre-tmux branch: undefined concurrencyKey means
+      // cancelTask already released, so do not double-release.
+      if (task.concurrencyKey) {
+        this.concurrencyManager.release(task.concurrencyKey)
+        task.concurrencyKey = undefined
+      }
       return
     }
 
@@ -519,6 +548,7 @@ export class BackgroundManager {
       toolCalls: 0,
       lastUpdate: new Date(),
     }
+    // task.concurrencyKey was already set in processKey; reaffirm for clarity.
     task.concurrencyKey = concurrencyKey
     task.concurrencyGroup = concurrencyKey
 

@@ -7,11 +7,12 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 
-function createMockContext(): ToolContext {
+function createMockContext(directory: string = process.cwd()): ToolContext {
   return {
     sessionID: "test",
     messageID: "test",
     agent: "test",
+    directory,
     abort: new AbortController().signal,
     metadata: mock(() => {}),
     ask: async () => {},
@@ -43,7 +44,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: `2#${hash}`, lines: "modified line2" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -77,7 +78,7 @@ describe("createHashlineEditTool", () => {
           },
         ],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -95,7 +96,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: "1#ZZ", lines: "new" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -114,7 +115,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: "42", lines: "updated" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -134,7 +135,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: `1#${line1Hash}`, lines: "join(\\n)" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     await tool.execute(
@@ -142,7 +143,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "append", pos: `1#${computeLineHash(1, "join(\\n)")}`, lines: ["a", "b"] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -165,7 +166,7 @@ describe("createHashlineEditTool", () => {
           { op: "append", pos: `1#${line1}`, lines: ["between"] },
         ],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -184,7 +185,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "append", pos: `1#${line1}`, lines: [] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -206,7 +207,7 @@ describe("createHashlineEditTool", () => {
         rename: renamedPath,
         edits: [{ op: "replace", pos: `2#${line2}`, lines: "line2-updated" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -227,7 +228,7 @@ describe("createHashlineEditTool", () => {
         delete: true,
         edits: [],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -248,7 +249,7 @@ describe("createHashlineEditTool", () => {
           { op: "prepend", lines: ["line1"] },
         ],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -269,7 +270,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: `2#${line2Hash}`, lines: ["line2-updated"] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -289,7 +290,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "append", end: `1#${line1Hash}`, lines: ["inserted"] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -309,7 +310,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "replace", pos: `2#${line2Hash}`, lines: "line2-updated" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -354,7 +355,7 @@ describe("createHashlineEditTool", () => {
         delete: true,
         edits: [{ op: "replace", pos: "1#ZZ", lines: "bad" }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -375,7 +376,7 @@ describe("createHashlineEditTool", () => {
         rename: path.join(tempDir, "new-name.txt"),
         edits: [],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -393,7 +394,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "append", pos: "1#ZZ", lines: ["bad"] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then
@@ -410,7 +411,7 @@ describe("createHashlineEditTool", () => {
         filePath,
         edits: [{ op: "append", lines: ["created"] }],
       },
-      createMockContext(),
+      createMockContext(tempDir),
     )
 
     //#then

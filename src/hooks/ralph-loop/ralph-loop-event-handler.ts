@@ -1,7 +1,7 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { log } from "../../shared/logger"
 import type { RalphLoopOptions, RalphLoopState } from "./types"
-import { HOOK_NAME } from "./constants"
+import { HOOK_NAME, DEFAULT_MAX_ITERATIONS, ULTRAWORK_MAX_ITERATIONS } from "./constants"
 import { handleDetectedCompletion } from "./completion-handler"
 import {
 	detectCompletionInSessionMessages,
@@ -162,19 +162,27 @@ export function createRalphLoopEventHandler(
 					return
 				}
 
-				if (
+				// Defence-in-depth: legacy state or a corrupted YAML block may leave
+				// max_iterations undefined. Enforce a hard ceiling so the loop cannot
+				// run unbounded.
+				const effectiveMaxIterations =
 					typeof state.max_iterations === "number"
-					&& state.iteration >= state.max_iterations
-				) {
+						? state.max_iterations
+						: state.ultrawork
+							? ULTRAWORK_MAX_ITERATIONS
+							: DEFAULT_MAX_ITERATIONS
+
+				if (state.iteration >= effectiveMaxIterations) {
 					log(`[${HOOK_NAME}] Max iterations reached`, {
 						sessionID,
 						iteration: state.iteration,
-						max: state.max_iterations,
+						max: effectiveMaxIterations,
+						maxSource: typeof state.max_iterations === "number" ? "state" : "default",
 					})
 					options.loopState.clear()
 
 					await ctx.client.tui?.showToast?.({
-						body: { title: "Ralph Loop Stopped", message: `Max iterations (${state.max_iterations}) reached without completion`, variant: "warning", duration: 5000 },
+						body: { title: "Ralph Loop Stopped", message: `Max iterations (${effectiveMaxIterations}) reached without completion`, variant: "warning", duration: 5000 },
 						}).catch(() => {})
 					return
 				}

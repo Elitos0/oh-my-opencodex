@@ -26,6 +26,7 @@ export const OpenClawReplyListenerConfigSchema = z.object({
 
   telegramBotToken: z.string().optional(),
   telegramChatId: z.string().optional(),
+  authorizedTelegramUserIds: z.array(z.string()).default([]),
 
   pollIntervalMs: z.number().default(3000),
   rateLimitPerMinute: z.number().default(10),

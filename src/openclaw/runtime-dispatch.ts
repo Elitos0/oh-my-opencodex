@@ -1,4 +1,5 @@
 import * as openclaw from "./index"
+import { ensurePaneNonce } from "./pane-nonce"
 import { registerMessage, removeSession } from "./session-registry"
 import { getCurrentTmuxSession } from "./tmux"
 import type { OpenClawConfig, WakeResult } from "./types"
@@ -67,6 +68,12 @@ export async function dispatchOpenClawEvent(
     const tmuxSession = params.context.tmuxSession ?? getCurrentTmuxSession()
     const platform = normalizePlatform(result?.platform)
     if (tmuxSession && platform && params.context.sessionId && params.context.projectPath && params.context.tmuxPaneId) {
+      // Stamp the pane with a per-pane nonce so the reply listener can
+      // verify it is injecting into the same pane that produced the outbound
+      // message. `ensurePaneNonce` is idempotent: if a nonce already exists
+      // on the pane, it is reused, so multiple outbound messages from the
+      // same pane all map to the same nonce.
+      const paneNonce = await ensurePaneNonce(params.context.tmuxPaneId)
       registerMessage({
         sessionId: params.context.sessionId,
         tmuxSession,
@@ -77,6 +84,7 @@ export async function dispatchOpenClawEvent(
         channelId: result?.channelId,
         threadId: result?.threadId,
         createdAt: new Date().toISOString(),
+        ...(paneNonce !== null && { paneNonce }),
       })
     }
   }

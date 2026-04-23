@@ -126,7 +126,7 @@ describe("pollDiscordReplies", () => {
     await pollDiscordReplies(createConfig(), state, new ReplyListenerRateLimiter(10))
 
     expect(lookupSpy).toHaveBeenCalledWith("discord-bot", "outbound-1")
-    expect(injectSpy).toHaveBeenCalledWith("%7", "Ship it", "discord", createConfig())
+    expect(injectSpy).toHaveBeenCalledWith("%7", "Ship it", "discord", createConfig(), undefined)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(state.messagesSeen).toBe(1)
     expect(state.messagesInjected).toBe(1)

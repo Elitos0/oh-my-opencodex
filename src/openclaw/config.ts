@@ -66,6 +66,11 @@ export function normalizeReplyListenerConfig(config: OpenClawConfig): OpenClawCo
           (id) => typeof id === "string" && id.trim() !== "",
         )
       : [],
+    authorizedTelegramUserIds: Array.isArray(replyListener.authorizedTelegramUserIds)
+      ? replyListener.authorizedTelegramUserIds.filter(
+          (id) => typeof id === "string" && id.trim() !== "",
+        )
+      : [],
   }
 
   return {

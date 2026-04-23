@@ -1,9 +1,24 @@
 import type { ClaudeCodeMcpServer } from "../claude-code-mcp-loader/types"
+import { NonInteractiveOAuthError } from "../mcp-oauth/oauth-authorization-flow"
 import { McpOAuthProvider } from "../mcp-oauth/provider"
 import { withRefreshMutex } from "../mcp-oauth/refresh-mutex"
 import type { OAuthTokenData } from "../mcp-oauth/storage"
 import { isStepUpRequired, mergeScopes } from "../mcp-oauth/step-up"
+import { log } from "../../shared"
 import type { OAuthProviderFactory, OAuthProviderLike } from "./types"
+
+// Servers we've already logged a non-interactive OAuth skip for, so the
+// warning isn't spammed on every subsequent request during the same session.
+const nonInteractiveSkipLogged = new Set<string>()
+
+function logNonInteractiveSkipOnce(serverUrl: string, error: NonInteractiveOAuthError): void {
+  if (nonInteractiveSkipLogged.has(serverUrl)) return
+  nonInteractiveSkipLogged.add(serverUrl)
+  log(
+    "[skill-mcp-manager] Skipping OAuth login for MCP server in non-interactive environment",
+    { serverUrl, reason: error.message },
+  )
+}
 
 export function getOrCreateAuthProvider(
   authProviders: Map<string, OAuthProviderLike>,
@@ -48,7 +63,10 @@ export async function buildHttpRequestInit(
     if (!tokenData) {
       try {
         tokenData = await provider.login()
-      } catch {
+      } catch (error) {
+        if (error instanceof NonInteractiveOAuthError) {
+          logNonInteractiveSkipOnce(config.url, error)
+        }
         tokenData = null
       }
     }
@@ -59,12 +77,20 @@ export async function buildHttpRequestInit(
           tokenData = refreshToken
             ? await withRefreshMutex(config.url, () => provider.refresh(refreshToken))
             : await provider.login()
-        } catch {
-          try {
-            tokenData = await provider.login()
-        } catch {
-          tokenData = null
-        }
+        } catch (outerError) {
+          if (outerError instanceof NonInteractiveOAuthError) {
+            logNonInteractiveSkipOnce(config.url, outerError)
+            tokenData = null
+          } else {
+            try {
+              tokenData = await provider.login()
+            } catch (innerError) {
+              if (innerError instanceof NonInteractiveOAuthError) {
+                logNonInteractiveSkipOnce(config.url, innerError)
+              }
+              tokenData = null
+            }
+          }
       }
     }
 
