@@ -124,55 +124,53 @@ function expandIPv6(ip: string): number[] | null {
 function isIPv6Denied(ip: string): boolean {
   const normalized = ip.toLowerCase()
 
-  // Unspecified (::), loopback (::1), IPv4-mapped (::ffff:a.b.c.d and all
-  // equivalent hex/expanded forms like ::ffff:7f00:1) are canonicalised via
-  // full expansion so the IPv4 checks catch every representation.
+  // IPv6 ranges are checked against the fully-expanded 8-group form so
+  // that abbreviated spellings (e.g. `fe8::1` which expands to
+  // `0fe8:0:0:0:0:0:0:1` and is NOT in fe80::/10) cannot false-positive
+  // against a regex that only sees the leading characters of the source
+  // string. This also canonicalises `::`, `::1`, and every IPv4-mapped
+  // representation to the same structural check.
   const groups = expandIPv6(normalized)
-  if (groups !== null) {
-    // All-zeros = ::
-    if (groups.every((g) => g === 0)) return true
-    // ::1
-    if (
-      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
-      && groups[4] === 0 && groups[5] === 0 && groups[6] === 0 && groups[7] === 1
-    ) {
-      return true
-    }
-    // IPv4-mapped prefix ::ffff:0:0/96 -- extract low 32 bits as an IPv4
-    // dotted-quad and delegate to isIPv4Denied. This blocks hex forms such
-    // as ::ffff:7f00:1 (127.0.0.1), ::ffff:a9fe:a9fe (169.254.169.254),
-    // 0:0:0:0:0:ffff:7f00:1, etc.
-    if (
-      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
-      && groups[4] === 0 && groups[5] === 0xffff
-    ) {
-      const high = groups[6]!
-      const low = groups[7]!
-      const mapped = `${(high >>> 8) & 0xff}.${high & 0xff}.${(low >>> 8) & 0xff}.${low & 0xff}`
-      if (isIPv4Denied(mapped)) return true
-    }
-    // IPv4-compatible prefix ::/96 (deprecated; treat embedded IPv4 the
-    // same way). An all-zero first 6 groups plus non-zero tail pointing at
-    // a private v4 should be rejected for defence-in-depth.
-    if (
-      groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0
-      && groups[4] === 0 && groups[5] === 0 && (groups[6] !== 0 || groups[7] !== 0)
-    ) {
-      const high = groups[6]!
-      const low = groups[7]!
-      const mapped = `${(high >>> 8) & 0xff}.${high & 0xff}.${(low >>> 8) & 0xff}.${low & 0xff}`
-      if (isIPv4Denied(mapped)) return true
-    }
+  if (groups === null) {
+    // Node's isIP() returned 6 but our expander didn't accept it. Fail
+    // closed: treat the address as denied rather than risk a bypass.
+    return true
   }
 
-  // Link-local fe80::/10
-  if (/^fe[89ab][0-9a-f]?:/.test(normalized)) return true
-  // Unique local fc00::/7
-  if (/^f[cd][0-9a-f]{0,2}:/.test(normalized)) return true
-  // Multicast ff00::/8
-  if (normalized.startsWith("ff")) return true
-  // Site-local fec0::/10 (deprecated but still private)
-  if (/^fe[cdef][0-9a-f]?:/.test(normalized)) return true
+  const g0 = groups[0]!
+  const g1 = groups[1]!
+  const g2 = groups[2]!
+  const g3 = groups[3]!
+  const g4 = groups[4]!
+  const g5 = groups[5]!
+  const g6 = groups[6]!
+  const g7 = groups[7]!
+
+  const firstSixZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0
+  // Unspecified :: and loopback ::1
+  if (firstSixZero && g5 === 0 && g6 === 0 && g7 === 0) return true
+  if (firstSixZero && g5 === 0 && g6 === 0 && g7 === 1) return true
+
+  // IPv4-mapped (::ffff:0:0/96) and deprecated IPv4-compatible (::/96)
+  // prefixes -- extract the low 32 bits as a dotted-quad and delegate to
+  // isIPv4Denied so every representation inherits the v4 denylist.
+  if (firstSixZero && (g5 === 0xffff || (g5 === 0 && (g6 !== 0 || g7 !== 0)))) {
+    const mapped = `${(g6 >>> 8) & 0xff}.${g6 & 0xff}.${(g7 >>> 8) & 0xff}.${g7 & 0xff}`
+    if (isIPv4Denied(mapped)) return true
+  }
+
+  // First-group CIDR checks on the fully-expanded value. Using integer
+  // range comparisons removes the abbreviation-sensitive regex false
+  // positives (e.g. `fe8::1` expands to g0=0x0fe8 which is NOT link-local
+  // but was matched by /^fe[89ab][0-9a-f]?:/).
+  // Link-local fe80::/10  -> g0 in [0xfe80, 0xfebf]
+  if (g0 >= 0xfe80 && g0 <= 0xfebf) return true
+  // Site-local fec0::/10  -> g0 in [0xfec0, 0xfeff] (deprecated but still private)
+  if (g0 >= 0xfec0 && g0 <= 0xfeff) return true
+  // Unique local fc00::/7 -> g0 in [0xfc00, 0xfdff]
+  if (g0 >= 0xfc00 && g0 <= 0xfdff) return true
+  // Multicast ff00::/8    -> g0 in [0xff00, 0xffff]
+  if (g0 >= 0xff00 && g0 <= 0xffff) return true
 
   return false
 }

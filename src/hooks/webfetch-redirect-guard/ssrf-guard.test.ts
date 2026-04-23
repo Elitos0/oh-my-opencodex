@@ -90,6 +90,13 @@ describe("isDeniedIp", () => {
       "2001:4860:4860::8888",
       "2606:4700:4700::1111",
       "::ffff:1.1.1.1",
+      // Abbreviated forms that LOOK like fe80::/10 or fc00::/7 but aren't
+      // once fully expanded. The previous regex-based check false-positively
+      // denied these because /^fe[89ab][0-9a-f]?:/ and
+      // /^f[cd][0-9a-f]{0,2}:/ admitted missing trailing hex digits.
+      "fe8::1", // 0fe8::1, NOT link-local (fe80::/10)
+      "fc::1", // 00fc::1, NOT unique-local (fc00::/7)
+      "fec::1", // 0fec::1, NOT site-local (fec0::/10)
     ]
     for (const ip of allowedCases) {
       test(`${ip} is allowed`, () => {
