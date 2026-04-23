@@ -83,7 +83,7 @@ export async function pollDiscordReplies(
         continue
       }
 
-      const success = await injectReplyIntoPane(mapping.tmuxPaneId, message.content, "discord", config)
+      const success = await injectReplyIntoPane(mapping.tmuxPaneId, message.content, "discord", config, mapping.paneNonce)
       if (success) {
         state.messagesInjected += 1
         try {

@@ -80,7 +80,7 @@ export async function pollTelegramReplies(
         continue
       }
 
-      const success = await injectReplyIntoPane(mapping.tmuxPaneId, message.text, "telegram", config)
+      const success = await injectReplyIntoPane(mapping.tmuxPaneId, message.text, "telegram", config, mapping.paneNonce)
       if (success) {
         state.messagesInjected += 1
         try {

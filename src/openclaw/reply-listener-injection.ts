@@ -1,3 +1,4 @@
+import { getPaneNonce, nonceEquals } from "./pane-nonce"
 import { removeMessagesByPane } from "./session-registry"
 import { analyzePaneContent, captureTmuxPane, sendToPane } from "./tmux"
 import { logReplyListenerMessage } from "./reply-listener-log"
@@ -44,8 +45,28 @@ export async function injectReplyIntoPane(
   text: string,
   platform: string,
   config: OpenClawConfig,
+  expectedPaneNonce?: string,
 ): Promise<boolean> {
   const replyListener = config.replyListener
+
+  // Primary authentication: per-pane nonce stamped at dispatch time. The
+  // scrollback-content heuristic below is a secondary belt-and-braces check
+  // that is NOT relied on for security -- any pane that happens to contain
+  // the string "opencode" would otherwise pass it, which is trivially
+  // attacker-controllable. A mismatched or missing nonce aborts injection
+  // and tears down the stale mapping so future replies for this message
+  // cannot be re-routed to the wrong pane.
+  if (expectedPaneNonce !== undefined) {
+    const currentNonce = await getPaneNonce(paneId)
+    if (!nonceEquals(currentNonce, expectedPaneNonce)) {
+      logReplyListenerMessage(
+        `SECURITY: Pane ${paneId} nonce mismatch (expected=${expectedPaneNonce.slice(0, 6)}..., got=${currentNonce ? currentNonce.slice(0, 6) + "..." : "<unset>"}). Aborting injection and clearing mapping.`,
+      )
+      removeMessagesByPane(paneId)
+      return false
+    }
+  }
+
   const content = await captureTmuxPane(paneId, 15)
   const analysis = analyzePaneContent(content)
 

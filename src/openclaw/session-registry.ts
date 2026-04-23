@@ -34,6 +34,16 @@ export interface SessionMapping {
   channelId?: string
   threadId?: string
   createdAt: string
+  /**
+   * Random per-pane token stamped on the tmux pane as a user-option
+   * (`@opencode-pane-nonce`) at the time the mapping was registered. The
+   * reply listener re-fetches this option before injecting keys, so that a
+   * different pane (attacker-controlled or a reused pane from another
+   * project) cannot hijack the injection even if its scrollback contains
+   * OpenCode-looking text that defeats the content heuristic. Absent on
+   * entries created before the nonce system was introduced.
+   */
+  paneNonce?: string
 }
 
 function ensureRegistryDir(): void {
